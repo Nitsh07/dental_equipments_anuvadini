@@ -1,0 +1,157 @@
+[
+  {
+    "workspace": "dentistry",
+    "project": "dental-instruments",
+    "version": 1,
+    "classes": [
+      "airotor",
+      "triple syringe dental",
+      "Blade holder",
+      "plastic filling instrument",
+      "Dycal carrier",
+      "Mouth mirror",
+      "forcep",
+      "Cord packer",
+      "prophy",
+      "Contra-angle handpiece",
+      "Burnisher",
+      "Explorer No.5",
+      "composite instrument",
+      "spoon excavators"
+    ]
+  },
+  {
+    "workspace": "dentistry",
+    "project": "dental-instruments",
+    "version": 2,
+    "classes": [
+      "airotor",
+      "triple syringe dental",
+      "Blade holder",
+      "plastic filling instrument",
+      "Dycal carrier",
+      "Mouth mirror",
+      "forcep",
+      "Cord packer",
+      "prophy",
+      "Contra-angle handpiece",
+      "Burnisher",
+      "Explorer No.5",
+      "composite instrument",
+      "spoon excavators"
+    ]
+  },
+  {
+    "workspace": "dental",
+    "project": "dental-instruments",
+    "version": 1,
+    "classes": [
+      "airotor",
+      "triple syringe dental",
+      "Blade holder",
+      "plastic filling instrument",
+      "Dycal carrier",
+      "Mouth mirror",
+      "forcep",
+      "Cord packer",
+      "prophy",
+      "Contra-angle handpiece",
+      "Burnisher",
+      "Explorer No.5",
+      "composite instrument",
+      "spoon excavators"
+    ]
+  },
+  {
+    "workspace": "dental",
+    "project": "dental-tools",
+    "version": 1,
+    "classes": [
+      "0",
+      "1",
+      "2",
+      "3"
+    ]
+  },
+  {
+    "workspace": "roboflow-universe-projects",
+    "project": "dental-instruments",
+    "version": 1,
+    "classes": [
+      "airotor",
+      "triple syringe dental",
+      "Blade holder",
+      "plastic filling instrument",
+      "Dycal carrier",
+      "Mouth mirror",
+      "forcep",
+      "Cord packer",
+      "prophy",
+      "Contra-angle handpiece",
+      "Burnisher",
+      "Explorer No.5",
+      "composite instrument",
+      "spoon excavators"
+    ]
+  },
+  {
+    "workspace": "medical-equipment",
+    "project": "medical-equipment",
+    "version": 1,
+    "classes": []
+  },
+  {
+    "workspace": "medical",
+    "project": "medical-equipment",
+    "version": 1,
+    "classes": []
+  },
+  {
+    "workspace": "surgical-instruments",
+    "project": "surgical-instruments",
+    "version": 1,
+    "classes": [
+      "forceps",
+      "clamps",
+      "parker"
+    ]
+  },
+  {
+    "workspace": "surgery",
+    "project": "surgical-instruments",
+    "version": 1,
+    "classes": [
+      "forceps",
+      "clamps",
+      "parker"
+    ]
+  },
+  {
+    "workspace": "hospital",
+    "project": "hospital-equipment",
+    "version": 1,
+    "classes": []
+  },
+  {
+    "workspace": "hospital",
+    "project": "medical-equipment",
+    "version": 1,
+    "classes": []
+  },
+  {
+    "workspace": "xray",
+    "project": "dental-xray",
+    "version": 1,
+    "classes": [
+      "xray"
+    ]
+  },
+  {
+    "workspace": "dental-xray",
+    "project": "dental-xray",
+    "version": 1,
+    "classes": [
+      "xray"
+    ]
+  }
+]
