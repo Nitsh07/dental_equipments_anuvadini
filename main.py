@@ -1,25 +1,18 @@
 """
-AI Dental & Clinical Equipment Detection System
-================================================
-Detection pipeline:
-  PRIMARY  — Custom YOLOv8 model fine-tuned on the
-             "Dental Tools.v1i.yolov8" dataset (5 dental
-             instrument classes).  Trained via train.py.
-             Weights: runs/detect/dental_tools/weights/best.pt
-
-  FALLBACK — YOLOv8x (COCO-80) with COCO→dental remapping
-             for broader equipment categories not covered by
-             the custom model (chairs, monitors, sinks, etc.)
+AI Dental Equipment Detection System
+=====================================
+Detects ONLY dental instruments using a custom YOLOv8 model
+fine-tuned on the "Dental Tools.v1i.yolov8" dataset (5 classes).
+Trained via train.py.  Weights: runs/detect/dental_tools/weights/best.pt
 
 Accuracy stack:
-  1. Custom dental model as primary detector
-  2. COCO base model as secondary (broader categories)
-  3. CLAHE pre-processing for low-light robustness
-  4. 2x2 tiled inference to catch small/distant objects
-  5. Per-class confidence gates
-  6. Geometry filters (aspect ratio + area)
-  7. Temporal voting (VOTE_WINDOW frames)
-  8. IoU tracker with 10-frame confidence smoothing
+  1. Custom dental model — sole detector (no COCO fallback,
+     no person/chair/sink false positives)
+  2. CLAHE pre-processing for low-light robustness
+  3. High confidence gate (CONF_THRESH) to reject weak detections
+  4. NMS merge across overlapping boxes
+  5. Temporal voting (VOTE_WINDOW frames) to reject single-frame flickers
+  6. IoU tracker with 10-frame confidence smoothing
 
 Run train.py first to produce the custom model weights.
 """
@@ -48,11 +41,8 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Custom model trained on the dental dataset (train.py output)
 CUSTOM_MODEL_PATH = os.path.join(
-    BASE_DIR, "runs", "detect", "dental_tools", "weights", "best.pt"
+    BASE_DIR, "runs", "detect", "dental_instruments", "weights", "best.pt"
 )
-
-# COCO base model — fallback for broader equipment categories
-MODEL_PATH = os.path.join(BASE_DIR, "yolov8x.pt")
 
 for d in ["outputs/videos", "outputs/reports",
           "outputs/screenshots", "outputs/analytics", "logs"]:
@@ -60,246 +50,45 @@ for d in ["outputs/videos", "outputs/reports",
 
 # ─────────────────────────────────────────────────────────────
 # CUSTOM MODEL CLASS NAMES
-# These are the 5 classes from the fine-tuned dental model.
-# They map directly to dental catalogue entries.
+# 14 raw classes from the Dental Instruments v30 dataset,
+# mapped to nicer display names.
 # ─────────────────────────────────────────────────────────────
 CUSTOM_DENTAL_CLASSES = {
-    "AllisForcep":      "Extraction Forceps",
-    "AustinRetractor":  "Retractors",
-    "BayonetForcep":    "Extraction Forceps",
-    "CheekRetractor":   "Retractors",
-    "Coupland1":        "Elevators",
+    "Blade holder":                "Blade Holder",
+    "Burnisher":                   "Burnisher",
+    "Contra-angle handpiece":      "Contra-Angle Handpiece",
+    "Cord packer":                 "Cord Packer",
+    "Dycal carrier":               "Dycal Carrier",
+    "Explorer No.5":               "Dental Explorer",
+    "Mouth mirror":                "Mouth Mirror",
+    "airotor":                     "Air Rotor (High-Speed Handpiece)",
+    "composite instrument":        "Composite Instrument",
+    "forcep":                      "Extraction Forceps",
+    "plastic filling instrument":  "Plastic Filling Instrument",
+    "prophy":                      "Prophy Angle",
+    "spoon excavators":            "Spoon Excavator",
+    "triple syringe dental":       "Triple Syringe (Air-Water)",
 }
 
 # ─────────────────────────────────────────────────────────────
-# DENTAL EQUIPMENT CATALOGUE
+# DENTAL EQUIPMENT CATALOGUE  (display_name → category)
+# Only items the custom model can actually detect.
 # ─────────────────────────────────────────────────────────────
-# Every item the system should report on.
-# Items marked with a COCO source will be detected by the base model.
-# Items without a COCO source require a custom model.
-
 DENTAL_CATALOGUE = {
-    # ── Dental Unit ──────────────────────────────────────────
-    "Dental Chair Unit":              "Dental Unit",
-    "Overhead Operating Light":       "Dental Unit",
-    "Dental Stool":                   "Dental Unit",
-    "Assistant Stool":                "Dental Unit",
-    "Cuspidor / Spittoon":            "Dental Unit",
-    "Air-Water Syringe":              "Dental Unit",
-    "Saliva Ejector":                 "Dental Unit",
-    "High-Volume Suction System":     "Dental Unit",
-    # ── Hand Instruments ─────────────────────────────────────
-    "Mouth Mirror":                   "Hand Instruments",
-    "Dental Explorer / Probe":        "Hand Instruments",
-    "Periodontal Probe":              "Hand Instruments",
-    "Tweezers / College Pliers":      "Hand Instruments",
-    "Dental Tray":                    "Hand Instruments",
-    "Instrument Tray":                "Hand Instruments",
-    # ── Handpieces & Rotary ──────────────────────────────────
-    "Dental Handpiece (High-Speed)":  "Handpieces & Rotary",
-    "Dental Handpiece (Low-Speed)":   "Handpieces & Rotary",
-    "Contra-Angle Handpiece":         "Handpieces & Rotary",
-    "Micromotor":                     "Handpieces & Rotary",
-    "Ultrasonic Scaler":              "Handpieces & Rotary",
-    "LED Curing Light":               "Handpieces & Rotary",
-    # ── Surgical Instruments ─────────────────────────────────
-    "Extraction Forceps":             "Surgical Instruments",
-    "Elevators":                      "Surgical Instruments",
-    "Scalers":                        "Surgical Instruments",
-    "Curettes":                       "Surgical Instruments",
-    "Dental Syringes":                "Surgical Instruments",
-    "Surgical Scissors":              "Surgical Instruments",
-    "Needle Holder":                  "Surgical Instruments",
-    "Hemostats":                      "Surgical Instruments",
-    "Retractors":                     "Surgical Instruments",
-    "Surgical Blades and Handles":    "Surgical Instruments",
-    # ── Endodontics ──────────────────────────────────────────
-    "Endodontic Files":               "Endodontics",
-    "Apex Locator":                   "Endodontics",
-    "Obturation System":              "Endodontics",
-    # ── Restorative ──────────────────────────────────────────
-    "Impression Trays":               "Restorative",
-    "Composite Filling Instruments":  "Restorative",
-    "Mixing Bowls and Spatulas":      "Restorative",
-    "Shade Guide":                    "Restorative",
-    "Articulator":                    "Restorative",
-    "Wax Heater":                     "Restorative",
-    "Amalgamator":                    "Restorative",
-    # ── Orthodontics ─────────────────────────────────────────
-    "Orthodontic Pliers":             "Orthodontics",
-    "Rubber Dam Kit":                 "Orthodontics",
-    # ── Imaging ──────────────────────────────────────────────
-    "X-Ray Machine":                  "Imaging",
-    "RVG Sensor":                     "Imaging",
-    "Intraoral Camera":               "Imaging",
-    "CBCT Scanner":                   "Imaging",
-    # ── Sterilisation ────────────────────────────────────────
-    "Autoclave Machine":              "Sterilisation",
-    "Ultrasonic Cleaner":             "Sterilisation",
-    "UV Sterilizer":                  "Sterilisation",
-    "Sterilization Pouches":          "Sterilisation",
-    # ── PPE & Safety ─────────────────────────────────────────
-    "PPE Kit":                        "PPE & Safety",
-    "Gloves Dispenser":               "PPE & Safety",
-    "Face Masks":                     "PPE & Safety",
-    "Face Shield":                    "PPE & Safety",
-    "Hand Sanitizer Dispenser":       "PPE & Safety",
-    "Biomedical Waste Bins":          "PPE & Safety",
-    # ── Emergency ────────────────────────────────────────────
-    "Oxygen Cylinder":                "Emergency",
-    "Pulse Oximeter":                 "Emergency",
-    "Blood Pressure Monitor":         "Emergency",
-    "AED (Defibrillator)":            "Emergency",
-    "Emergency Medicine Kit":         "Emergency",
-    "First Aid Kit":                  "Emergency",
-    # ── Furniture & Infrastructure ───────────────────────────
-    "Instrument Cabinets":            "Furniture & Infrastructure",
-    "Medicine Storage Cabinet":       "Furniture & Infrastructure",
-    "Mobile Trolley":                 "Furniture & Infrastructure",
-    "Sink with Running Water":        "Furniture & Infrastructure",
-    # ── IT & Display ─────────────────────────────────────────
-    "Computer System":                "IT & Display",
-    "Monitor / Display Screen":       "IT & Display",
-    "Printer":                        "IT & Display",
-    # ── Consumables ──────────────────────────────────────────
-    "Cotton Rolls":                   "Consumables",
-    "Gauze Pieces":                   "Consumables",
-    "Disposable Cups":                "Consumables",
-    "Needles and Syringes":           "Consumables",
-    "Dental Burs":                    "Consumables",
-    "Impression Materials":           "Consumables",
-    "Filling Materials":              "Consumables",
-    "Suction Tips":                   "Consumables",
-    "Sterile Drapes":                 "Consumables",
-    "Dental Bibs":                    "Consumables",
-    # ── Lab Equipment ────────────────────────────────────────
-    "Suction Pump":                   "Lab Equipment",
-    "Compressor":                     "Lab Equipment",
-    "Water Distiller":                "Lab Equipment",
-    "Lab Micromotor":                 "Lab Equipment",
-}
-
-# ─────────────────────────────────────────────────────────────
-# COCO → DENTAL NAME MAPPING
-# Only high-confidence visual matches are included.
-# Speculative / low-confidence mappings are excluded to
-# prevent false positives.
-# ─────────────────────────────────────────────────────────────
-COCO_TO_DENTAL = {
-    # ── Seating (strong visual match) ────────────────────────
-    "chair":        "Dental Chair Unit",
-    "couch":        "Dental Chair Unit",
-    "bench":        "Dental Stool",
-
-    # ── Screens & computers (exact match) ────────────────────
-    "tv":           "Monitor / Display Screen",
-    "laptop":       "Computer System",
-    "keyboard":     "Computer System",
-    "mouse":        "Computer System",
-
-    # ── Furniture (strong match) ──────────────────────────────
-    "bed":          "Instrument Cabinets",
-    "dining table": "Instrument Tray",
-
-    # ── Plumbing (strong match) ───────────────────────────────
-    "sink":         "Sink with Running Water",
-    "toilet":       "Cuspidor / Spittoon",
-
-    # ── Cylindrical containers (strong match) ─────────────────
-    "bottle":       "Hand Sanitizer Dispenser",
-    "cup":          "Disposable Cups",
-    "bowl":         "Mixing Bowls and Spatulas",
-    "vase":         "Suction Tips",
-
-    # ── Cutting instruments (strong match) ────────────────────
-    "scissors":     "Surgical Scissors",
-    "knife":        "Surgical Blades and Handles",
-
-    # ── Small handheld devices (strong match) ─────────────────
-    "cell phone":   "Intraoral Camera",
-    "toothbrush":   "Dental Explorer / Probe",
-
-    # ── Cylindrical pressurised vessel ────────────────────────
-    "fire hydrant": "Oxygen Cylinder",
-
-    # ── Flat round objects ────────────────────────────────────
-    "frisbee":      "Impression Trays",
-
-    # ── Spoon / fork → mixing / retraction ────────────────────
-    "spoon":        "Mixing Bowls and Spatulas",
-    "fork":         "Retractors",
-
-    # ── Person in clinical context → PPE ──────────────────────
-    "person":       "PPE Kit",
-}
-
-# ─────────────────────────────────────────────────────────────
-# PER-CLASS CONFIDENCE GATES
-# Each COCO class has its own minimum confidence threshold.
-# Classes that are visually ambiguous get a higher gate to
-# reduce false positives.  Classes with strong visual match
-# get a lower gate so we don't miss them.
-# ─────────────────────────────────────────────────────────────
-CLASS_CONF_GATE = {
-    "chair":        0.45,   # very common, high precision needed
-    "couch":        0.50,
-    "bench":        0.45,
-    "tv":           0.50,
-    "laptop":       0.45,
-    "keyboard":     0.50,
-    "mouse":        0.50,
-    "bed":          0.50,
-    "dining table": 0.45,
-    "sink":         0.50,
-    "toilet":       0.55,
-    "bottle":       0.45,
-    "cup":          0.45,
-    "bowl":         0.45,
-    "vase":         0.45,
-    "scissors":     0.40,
-    "knife":        0.45,
-    "cell phone":   0.45,
-    "toothbrush":   0.40,
-    "fire hydrant": 0.50,
-    "frisbee":      0.45,
-    "spoon":        0.40,
-    "fork":         0.40,
-    "person":       0.55,
-}
-
-# ─────────────────────────────────────────────────────────────
-# GEOMETRY FILTERS
-# (min_aspect, max_aspect, min_area_frac, max_area_frac)
-# aspect = w/h of bounding box
-# area_frac = box_area / frame_area
-# Detections outside these ranges are rejected.
-# ─────────────────────────────────────────────────────────────
-GEOMETRY_FILTER = {
-    # chairs are roughly square to slightly wide
-    "chair":        (0.4, 2.5,  0.005, 0.60),
-    "couch":        (1.0, 5.0,  0.02,  0.70),
-    "bench":        (0.3, 3.0,  0.005, 0.50),
-    "tv":           (0.8, 3.5,  0.01,  0.60),
-    "laptop":       (0.8, 2.5,  0.005, 0.40),
-    "keyboard":     (1.5, 6.0,  0.003, 0.25),
-    "mouse":        (0.5, 2.0,  0.001, 0.08),
-    "bed":          (0.8, 4.0,  0.02,  0.80),
-    "dining table": (0.5, 5.0,  0.01,  0.80),
-    "sink":         (0.5, 3.0,  0.005, 0.40),
-    "toilet":       (0.4, 2.0,  0.005, 0.40),
-    "bottle":       (0.1, 0.8,  0.001, 0.15),
-    "cup":          (0.3, 2.0,  0.001, 0.10),
-    "bowl":         (0.5, 2.5,  0.001, 0.15),
-    "vase":         (0.1, 1.2,  0.001, 0.15),
-    "scissors":     (0.2, 1.5,  0.001, 0.10),
-    "knife":        (0.05,0.8,  0.001, 0.10),
-    "cell phone":   (0.2, 1.2,  0.001, 0.10),
-    "toothbrush":   (0.05,0.6,  0.001, 0.08),
-    "fire hydrant": (0.3, 1.5,  0.002, 0.20),
-    "frisbee":      (0.5, 2.0,  0.001, 0.15),
-    "spoon":        (0.05,0.8,  0.001, 0.08),
-    "fork":         (0.05,0.6,  0.001, 0.08),
-    "person":       (0.2, 1.5,  0.005, 0.90),
+    "Mouth Mirror":                       "Hand Instruments",
+    "Dental Explorer":                    "Hand Instruments",
+    "Burnisher":                          "Hand Instruments",
+    "Spoon Excavator":                    "Hand Instruments",
+    "Air Rotor (High-Speed Handpiece)":   "Handpieces & Rotary",
+    "Contra-Angle Handpiece":             "Handpieces & Rotary",
+    "Prophy Angle":                       "Handpieces & Rotary",
+    "Composite Instrument":               "Restorative",
+    "Plastic Filling Instrument":         "Restorative",
+    "Dycal Carrier":                      "Restorative",
+    "Cord Packer":                        "Restorative",
+    "Extraction Forceps":                 "Surgical Instruments",
+    "Blade Holder":                       "Surgical Instruments",
+    "Triple Syringe (Air-Water)":         "Dental Unit",
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -453,30 +242,21 @@ print("\n" + "="*60)
 print("  AI DENTAL EQUIPMENT DETECTION SYSTEM  —  Loading")
 print("="*60)
 
-model_custom = None
-model_base   = None
-
-# ── Primary: custom dental model ──────────────────────────
-if _is_valid_pt(CUSTOM_MODEL_PATH):
-    model_custom = _load_yolo(CUSTOM_MODEL_PATH, "Custom dental model (primary)")
-    print("  Custom dental model active — using as primary detector.")
-else:
-    print(f"  [INFO] Custom model not found at:")
-    print(f"         {CUSTOM_MODEL_PATH}")
+if not _is_valid_pt(CUSTOM_MODEL_PATH):
+    print(f"  [ERROR] Custom dental model not found at:")
+    print(f"          {CUSTOM_MODEL_PATH}")
     print("  Run train.py first to train on the dental dataset.")
-    print("  Falling back to COCO base model only.\n")
+    sys.exit(1)
 
-# ── Secondary / fallback: COCO base model ─────────────────
-model_base = _load_yolo(MODEL_PATH, "YOLOv8x (COCO fallback)")
-
-print()
+model_custom = _load_yolo(CUSTOM_MODEL_PATH, "Custom dental model")
+print("  Custom dental model active.\n")
 
 # ─────────────────────────────────────────────────────────────
-# INFERENCE  (multi-scale tiled + standard pass + accuracy filters)
+# INFERENCE  (custom model only — dental instruments)
 # ─────────────────────────────────────────────────────────────
 
 def _run_model(m, frame, imgsz, conf_thresh, iou_thresh):
-    """Run one YOLO model, return raw (x1,y1,x2,y2,cls_name,conf) list."""
+    """Run YOLO model, return raw (x1,y1,x2,y2,cls_name,conf) list."""
     results = m.predict(
         source=frame,
         conf=conf_thresh,
@@ -500,69 +280,12 @@ def _run_model(m, frame, imgsz, conf_thresh, iou_thresh):
     return dets
 
 
-def _passes_geometry(x1, y1, x2, y2, raw_name, frame_h, frame_w):
-    """Return True if the box geometry is plausible for this class."""
-    filt = GEOMETRY_FILTER.get(raw_name)
-    if filt is None:
-        return True
-    min_asp, max_asp, min_af, max_af = filt
-    bw = max(x2 - x1, 1)
-    bh = max(y2 - y1, 1)
-    asp = bw / bh
-    af  = (bw * bh) / max(frame_h * frame_w, 1)
-    return (min_asp <= asp <= max_asp) and (min_af <= af <= max_af)
-
-
-def _tile_inference(frame, conf_thresh):
-    """2×2 tiled inference with COCO base model — catches small/distant objects."""
-    h, w = frame.shape[:2]
-    tiles = [
-        (0,    0,    w//2, h//2),
-        (w//2, 0,    w,    h//2),
-        (0,    h//2, w//2, h),
-        (w//2, h//2, w,    h),
-    ]
-    all_dets = []
-    for (tx1, ty1, tx2, ty2) in tiles:
-        tile = frame[ty1:ty2, tx1:tx2]
-        if tile.size == 0:
-            continue
-        for (x1, y1, x2, y2, name, conf) in _run_model(
-                model_base, tile, 640, conf_thresh, 0.45):
-            all_dets.append((x1+tx1, y1+ty1, x2+tx1, y2+ty1, name, conf))
-    return all_dets
-
-
-def _tile_inference_custom(frame, conf_thresh):
-    """2×2 tiled inference with custom dental model — catches small instruments."""
-    if model_custom is None:
-        return []
-    h, w = frame.shape[:2]
-    tiles = [
-        (0,    0,    w//2, h//2),
-        (w//2, 0,    w,    h//2),
-        (0,    h//2, w//2, h),
-        (w//2, h//2, w,    h),
-    ]
-    all_dets = []
-    for (tx1, ty1, tx2, ty2) in tiles:
-        tile = frame[ty1:ty2, tx1:tx2]
-        if tile.size == 0:
-            continue
-        for (x1, y1, x2, y2, name, conf) in _run_model(
-                model_custom, tile, 640, conf_thresh, 0.40):
-            all_dets.append((x1+tx1, y1+ty1, x2+tx1, y2+ty1, name, conf))
-    return all_dets
-
-
-def _nms_merge(dets, iou_thresh=0.45):
+def _nms_merge(dets, iou_thresh=0.25):
     """
-    NMS across merged detections from multiple passes.
-
-    Groups by DENTAL name (after remapping) so that:
-      - Duplicate detections of the SAME instrument from tiling are suppressed
-      - Two DIFFERENT instruments of the same type (e.g. two forceps) are
-        kept as long as their boxes don't heavily overlap (IoU < iou_thresh)
+    NMS grouped by dental name.
+      - Duplicate detections of the SAME instrument get suppressed
+      - Two DIFFERENT instances of the same type are kept if their
+        boxes don't heavily overlap (IoU < iou_thresh)
 
     dets: list of (x1,y1,x2,y2, dental_name, conf)
     """
@@ -573,89 +296,35 @@ def _nms_merge(dets, iou_thresh=0.45):
         by_name[d[4]].append(d)
     kept = []
     for _, ndets in by_name.items():
-        ndets.sort(key=lambda x: -x[5])   # highest conf first
+        ndets.sort(key=lambda x: -x[5])
         while ndets:
             best = ndets.pop(0)
             kept.append(best)
-            # Only suppress boxes that heavily overlap with 'best'
-            # — keeps genuinely separate instances of the same instrument
             ndets = [d for d in ndets
                      if SimpleTracker._iou(best[:4], d[:4]) < iou_thresh]
     return kept
 
 
-def _remap_det(raw_name, conf, x1, y1, x2, y2, fh, fw):
+def run_inference(frame, conf_thresh=0.50):
     """
-    Map a raw YOLO class name → dental catalogue name.
-    Returns (dental_name, conf) or (None, None) if rejected.
-
-    Priority:
-      1. Custom model classes  (AllisForcep, AustinRetractor, …)
-      2. Direct catalogue name (shouldn't happen but handled)
-      3. COCO→dental mapping   (chair, scissors, …)
-    """
-    # ── Custom model ──────────────────────────────────────
-    if raw_name in CUSTOM_DENTAL_CLASSES:
-        if conf < 0.30:
-            return None, None
-        return CUSTOM_DENTAL_CLASSES[raw_name], conf
-
-    # ── Already a catalogue name ──────────────────────────
-    if raw_name in DENTAL_CATALOGUE:
-        if conf < 0.30:
-            return None, None
-        return raw_name, conf
-
-    # ── COCO base model ───────────────────────────────────
-    dental_name = COCO_TO_DENTAL.get(raw_name)
-    if dental_name is None:
-        return None, None
-    gate = CLASS_CONF_GATE.get(raw_name, 0.40)
-    if conf < gate:
-        return None, None
-    if not _passes_geometry(x1, y1, x2, y2, raw_name, fh, fw):
-        return None, None
-    return dental_name, conf
-
-
-def run_inference(frame, conf_thresh=0.25):
-    """
-    Full accuracy pipeline:
-      1. CLAHE enhancement
-      2. Custom dental model — full frame + 2×2 tiles
-      3. COCO base model    — full frame + 2×2 tiles
-      4. Remap raw class names → dental catalogue names
-      5. NMS grouped by dental name (keeps separate instances,
-         suppresses duplicate detections of the same object)
+    Dental-only inference:
+      1. CLAHE low-light enhancement
+      2. Custom dental model on the full frame
+      3. Map raw class names (AllisForcep, …) → catalogue names
+      4. NMS to suppress duplicate boxes for the same object
     Returns list of (x1,y1,x2,y2, dental_name, conf)
     """
-    fh, fw = frame.shape[:2]
     enhanced = enhance_frame(frame)
+    raw_dets = _run_model(model_custom, enhanced, INFER_IMGSZ, conf_thresh, 0.45)
 
-    raw_dets = []   # (x1,y1,x2,y2, raw_name, conf)
-
-    # ── Custom dental model (primary) ─────────────────────
-    if model_custom is not None:
-        raw_dets += _run_model(model_custom, enhanced, INFER_IMGSZ, conf_thresh, 0.40)
-        if fw >= 640 and fh >= 480:
-            raw_dets += _tile_inference_custom(enhanced, conf_thresh)
-
-    # ── COCO base model (secondary) ───────────────────────
-    raw_dets += _run_model(model_base, enhanced, INFER_IMGSZ, conf_thresh, 0.40)
-    if fw >= 640 and fh >= 480:
-        raw_dets += _tile_inference(enhanced, conf_thresh)
-
-    # ── Remap to dental names BEFORE NMS ──────────────────
     remapped = []
     for (x1, y1, x2, y2, raw_name, conf) in raw_dets:
-        dental_name, new_conf = _remap_det(raw_name, conf, x1, y1, x2, y2, fh, fw)
-        if dental_name is not None:
-            remapped.append((x1, y1, x2, y2, dental_name, new_conf))
+        dental_name = CUSTOM_DENTAL_CLASSES.get(raw_name)
+        if dental_name is None:
+            continue
+        remapped.append((x1, y1, x2, y2, dental_name, conf))
 
-    # ── NMS grouped by dental name ─────────────────────────
-    # iou_thresh=0.45: suppresses duplicate tile detections of the
-    # same object while keeping genuinely separate instruments
-    return _nms_merge(remapped, iou_thresh=0.45)
+    return _nms_merge(remapped, iou_thresh=0.25)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -683,9 +352,9 @@ class TemporalVoter:
         """
         self._history.append(dets)
         if len(self._history) < self.min_hits:
-            # Not enough history yet — pass everything through
-            # (avoids blank screen at start)
-            return dets
+            # Not enough history yet — hold detections back rather than
+            # passing flickers through (a few blank frames at start is OK)
+            return []
 
         confirmed = []
         for det in dets:
@@ -753,54 +422,40 @@ def draw_tracked(frame, tracked):
             cv2.line(frame, (cx, cy), (cx + sx * clen, cy), color, ct)
             cv2.line(frame, (cx, cy), (cx, cy + sy * clen), color, ct)
 
-        # ── Label ─────────────────────────────────────────
-        # Scale font to box size: small box → smaller font
+        # ── Label (instrument name only) ──────────────────
         font       = cv2.FONT_HERSHEY_SIMPLEX
-        font_scale = max(0.38, min(0.70, diag / 500))
+        font_scale = max(0.45, min(0.80, diag / 450))
         font_thick = max(1, int(font_scale * 2.2))
 
-        # Line 1: instrument name (may be long — wrap if needed)
-        # Truncate to fit within box width
-        line1 = name
-        (tw1, th1), bl1 = cv2.getTextSize(line1, font, font_scale, font_thick)
-        # If name is wider than box, shrink font until it fits
+        label = name
+        (tw, th), bl = cv2.getTextSize(label, font, font_scale, font_thick)
         fs = font_scale
-        while tw1 > bw - 10 and fs > 0.28:
+        # Shrink if name is wider than the box
+        while tw > bw - 10 and fs > 0.32:
             fs -= 0.04
-            (tw1, th1), bl1 = cv2.getTextSize(line1, font, fs, font_thick)
+            (tw, th), bl = cv2.getTextSize(label, font, fs, font_thick)
 
-        # Line 2: #ID  conf
-        line2 = f"#{tid}  {conf * 100:.1f}%"
-        (tw2, th2), bl2 = cv2.getTextSize(line2, font, fs * 0.85, font_thick)
+        label_w = tw + 10
+        label_h = th + bl + 8
 
-        label_w = max(tw1, tw2) + 10
-        label_h = th1 + th2 + bl1 + 8
-
-        # Place label above box; fall back to inside-top if no room
+        # Place label above the box; fall back to inside-top if no room
         if y1 - label_h - 4 >= 0:
             lx = x1
-            ly_top = y1 - label_h - 4   # top of background rect
+            ly_top = y1 - label_h - 4
         else:
             lx = x1
             ly_top = y1 + 2
 
-        # Background rect
         cv2.rectangle(frame,
                       (lx, ly_top),
-                      (lx + label_w, ly_top + label_h + 4),
+                      (lx + label_w, ly_top + label_h),
                       color, -1)
 
         txt_color = (0, 0, 0) if sum(color) > 380 else (255, 255, 255)
 
-        # Draw line 1 (name)
-        cv2.putText(frame, line1,
-                    (lx + 5, ly_top + th1 + 2),
+        cv2.putText(frame, label,
+                    (lx + 5, ly_top + th + 4),
                     font, fs, txt_color, font_thick, cv2.LINE_AA)
-
-        # Draw line 2 (#ID conf)
-        cv2.putText(frame, line2,
-                    (lx + 5, ly_top + th1 + th2 + bl1 + 5),
-                    font, fs * 0.85, txt_color, font_thick, cv2.LINE_AA)
 
     return frame
 
@@ -964,264 +619,29 @@ def generate_pdf_report(all_detections, detected_equipment):
 
 
 # ─────────────────────────────────────────────────────────────
-# IMAGE DETECTION
-# Handles single image files and whole folders of images.
-# Uses the same inference pipeline as the video path but
-# without threading / temporal voting (single-frame context).
-# ─────────────────────────────────────────────────────────────
-
-# Supported image extensions
-_IMG_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".webp"}
-
-
-def _collect_images(path: str):
-    """Return a sorted list of image paths from a file or directory."""
-    p = path.strip().strip('"').strip("'")
-    if os.path.isfile(p):
-        if os.path.splitext(p)[1].lower() in _IMG_EXTS:
-            return [p]
-        print(f"  [ERROR] Not a supported image file: {p}")
-        return []
-    if os.path.isdir(p):
-        imgs = sorted(
-            f for f in (os.path.join(p, n) for n in os.listdir(p))
-            if os.path.isfile(f) and os.path.splitext(f)[1].lower() in _IMG_EXTS
-        )
-        if not imgs:
-            print(f"  [ERROR] No images found in folder: {p}")
-        return imgs
-    print(f"  [ERROR] Path not found: {p}")
-    return []
-
-
-def _draw_image_hud(frame, det_count, detected_set, source_label):
-    """Lightweight HUD for static images (no FPS / progress bar)."""
-    h, w = frame.shape[:2]
-    panel_w, panel_h = 380, 80
-    ov = frame.copy()
-    cv2.rectangle(ov, (6, 6), (6 + panel_w, 6 + panel_h), (10, 10, 10), -1)
-    cv2.addWeighted(ov, 0.60, frame, 0.40, 0, frame)
-    lines = [
-        f"Source : {source_label}",
-        f"Dets   : {det_count}  |  Unique: {len(detected_set)}",
-        f"Device : {DEVICE.upper()}",
-    ]
-    for i, line in enumerate(lines):
-        cv2.putText(frame, line, (14, 30 + i * 22),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.55,
-                    (0, 255, 180), 1, cv2.LINE_AA)
-    return frame
-
-
-def run_image_detection(image_paths: list):
-    """
-    Run detection on one or more images.
-
-    For each image:
-      • Runs the full inference pipeline (custom model + COCO fallback)
-      • Draws bounding boxes with two-line labels per instrument
-      • Saves annotated image to outputs/screenshots/
-      • Displays the result in a window (any key = next, Q/ESC = quit)
-      • Prints a per-image table of every detected instrument
-
-    After all images:
-      • Saves detection_log.csv / .json
-      • Generates PDF report
-      • Prints summary
-    """
-    all_detections = []
-    detected_equip = set()
-    out_dir        = os.path.join(BASE_DIR, "outputs", "screenshots")
-    os.makedirs(out_dir, exist_ok=True)
-
-    WIN = "Dental Equipment Detection  |  Any key = next  |  Q / ESC = quit"
-    cv2.namedWindow(WIN, cv2.WINDOW_NORMAL)
-
-    total = len(image_paths)
-    print(f"\n  Processing {total} image(s) ...")
-    print(f"  Custom model : {'ACTIVE' if model_custom is not None else 'NOT LOADED (run train.py first)'}")
-    print(f"  Device       : {DEVICE}\n")
-
-    for idx, img_path in enumerate(image_paths, 1):
-        frame = cv2.imread(img_path)
-        if frame is None:
-            print(f"  [SKIP] Cannot read: {img_path}")
-            continue
-
-        h, w   = frame.shape[:2]
-        source_label = os.path.basename(img_path)
-
-        print(f"  ─── [{idx}/{total}] {source_label}  ({w}×{h}) ───")
-
-        # ── Inference ──────────────────────────────────────
-        t0         = time.time()
-        dets       = run_inference(frame, conf_thresh=CONF_THRESH)
-        elapsed_ms = (time.time() - t0) * 1000
-
-        # Assign stable sequential IDs (no tracker needed for images)
-        tracked = [
-            (x1, y1, x2, y2, name, conf, i + 1)
-            for i, (x1, y1, x2, y2, name, conf) in enumerate(dets)
-        ]
-
-        # ── Per-image terminal table ───────────────────────
-        if tracked:
-            print(f"  {'#':<4} {'Instrument':<38} {'Category':<26} {'Conf':>6}")
-            print(f"  {'─'*4} {'─'*38} {'─'*26} {'─'*6}")
-            for (x1, y1, x2, y2, name, conf, tid) in tracked:
-                cat = DENTAL_CATALOGUE.get(name, "—")
-                print(f"  {tid:<4} {name:<38} {cat:<26} {conf*100:>5.1f}%")
-        else:
-            print("  No dental equipment detected.")
-        print(f"  Inference time: {elapsed_ms:.0f} ms  |  {len(tracked)} detection(s)\n")
-
-        # ── Draw ───────────────────────────────────────────
-        annotated = draw_tracked(frame.copy(), tracked)
-        annotated = _draw_image_hud(
-            annotated, len(tracked),
-            {t[4] for t in tracked},
-            source_label
-        )
-
-        # ── Save annotated image ───────────────────────────
-        base_name = os.path.splitext(source_label)[0]
-        out_path  = os.path.join(out_dir, f"{base_name}_detected.jpg")
-        cv2.imwrite(out_path, annotated, [cv2.IMWRITE_JPEG_QUALITY, 95])
-
-        # ── Record detections ──────────────────────────────
-        for (x1, y1, x2, y2, name, conf, tid) in tracked:
-            detected_equip.add(name)
-            all_detections.append({
-                "image_index": idx,
-                "image_file":  source_label,
-                "det_id":      tid,
-                "dental_name": name,
-                "category":    DENTAL_CATALOGUE.get(name, ""),
-                "confidence":  round(conf, 4),
-                "bbox_x1": x1, "bbox_y1": y1,
-                "bbox_x2": x2, "bbox_y2": y2,
-                "annotated_path": out_path,
-            })
-
-        # ── Display ────────────────────────────────────────
-        disp_w = min(w, 1280)
-        disp_h = int(h * disp_w / w)
-        cv2.resizeWindow(WIN, disp_w, disp_h)
-        cv2.imshow(WIN, annotated)
-
-        key = cv2.waitKey(0) & 0xFF
-        if key in (ord("q"), ord("Q"), 27):
-            print("  Stopped by user.")
-            break
-
-    cv2.destroyAllWindows()
-
-    # ── Save logs ──────────────────────────────────────────
-    print("\n  Saving logs ...")
-    if all_detections:
-        df    = pd.DataFrame(all_detections)
-        csv_p = os.path.join(BASE_DIR, "outputs", "reports", "detection_log.csv")
-        df.to_csv(csv_p, index=False)
-        print(f"  CSV  : {csv_p}")
-
-        json_p = os.path.join(BASE_DIR, "outputs", "reports", "detection_log.json")
-        with open(json_p, "w") as jf:
-            json.dump(all_detections, jf, indent=4)
-        print(f"  JSON : {json_p}")
-
-        print("  Generating PDF report ...")
-        try:
-            pdf_p = generate_pdf_report(all_detections, detected_equip)
-            print(f"  PDF  : {pdf_p}")
-        except Exception as e:
-            print(f"  [WARNING] PDF failed: {e}")
-    else:
-        print("  No target equipment detected in any image.")
-
-    # ── Summary ────────────────────────────────────────────
-    total_req  = len(DENTAL_CATALOGUE)
-    compliance = int(len(detected_equip) / total_req * 100) if total_req else 0
-
-    print()
-    print("=" * 60)
-    print("  IMAGE DETECTION SUMMARY")
-    print("=" * 60)
-    print(f"  Images processed : {total}")
-    print(f"  Total detections : {len(all_detections)}")
-    print(f"  Unique equipment : {len(detected_equip)} / {total_req}")
-    print(f"  Compliance score : {compliance}%")
-    print()
-
-    if detected_equip:
-        print(f"  {'Category':<26}  {'Equipment':<38}  {'Count':>5}")
-        print(f"  {'─'*26}  {'─'*38}  {'─'*5}")
-        # Count per dental name
-        name_counts = defaultdict(int)
-        for d in all_detections:
-            name_counts[d["dental_name"]] += 1
-        for cat in _CATEGORY_LIST:
-            for item in [k for k, v in DENTAL_CATALOGUE.items() if v == cat]:
-                if item in detected_equip:
-                    print(f"  {cat:<26}  {item:<38}  {name_counts[item]:>5}")
-
-    print()
-    print(f"  Annotated images : {out_dir}")
-    print(f"  Reports folder   : {os.path.join(BASE_DIR, 'outputs', 'reports')}")
-    print("=" * 60 + "\n")
-
-
-# ─────────────────────────────────────────────────────────────
 # SOURCE SELECTION
+# Video file only — pass on the command line or be prompted.
+#   python main.py <path-to-video>
 # ─────────────────────────────────────────────────────────────
 def ask_source():
     print("=" * 60)
     print("  AI DENTAL EQUIPMENT DETECTION SYSTEM")
     print("=" * 60)
     print()
-    print("  Select input source:")
-    print("  [1] Video file      (mp4, avi, mov, mkv)")
-    print("  [2] Webcam")
-    print("  [3] CCTV / RTSP stream")
-    print("  [4] Image file      (jpg, png, bmp, …)")
-    print("  [5] Image folder    (all images in a directory)")
-    print()
 
+    # CLI argument takes priority
+    if len(sys.argv) > 1:
+        p = sys.argv[1].strip().strip('"').strip("'")
+        if os.path.isfile(p):
+            return p, os.path.basename(p)
+        print(f"  [ERROR] Video file not found: {p}\n")
+
+    # Interactive prompt
     while True:
-        choice = input("  Enter choice (1/2/3/4/5): ").strip()
-
-        if choice == "1":
-            while True:
-                p = input("\n  Video file path: ").strip().strip('"').strip("'")
-                if os.path.isfile(p):
-                    return "video", p, os.path.basename(p)
-                print(f"  [ERROR] Not found: {p}")
-
-        elif choice == "2":
-            idx = input("  Webcam index (default 0): ").strip()
-            idx = int(idx) if idx.isdigit() else 0
-            return "video", idx, f"Webcam {idx}"
-
-        elif choice == "3":
-            url = input("  RTSP / stream URL: ").strip()
-            return "video", url, "CCTV Stream"
-
-        elif choice == "4":
-            while True:
-                p = input("\n  Image file path: ").strip().strip('"').strip("'")
-                imgs = _collect_images(p)
-                if imgs:
-                    return "image", imgs, os.path.basename(p)
-
-        elif choice == "5":
-            while True:
-                p = input("\n  Image folder path: ").strip().strip('"').strip("'")
-                imgs = _collect_images(p)
-                if imgs:
-                    print(f"  Found {len(imgs)} image(s).")
-                    return "image", imgs, os.path.basename(p.rstrip("/\\"))
-
-        else:
-            print("  Please enter 1, 2, 3, 4, or 5.")
+        p = input("  Video file path: ").strip().strip('"').strip("'")
+        if os.path.isfile(p):
+            return p, os.path.basename(p)
+        print(f"  [ERROR] Not found: {p}")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -1245,28 +665,26 @@ import queue as _queue
 # imgsz=640 is ~4x faster than 1280 on CPU with no accuracy loss
 # for objects that fill >5% of the frame (chairs, monitors, etc.)
 # augment=False saves another ~2x on CPU
-INFER_IMGSZ   = 640
+INFER_IMGSZ   = 640     # larger = better localization on dense scenes
 INFER_AUGMENT = False   # set True only if you have a GPU
-CONF_THRESH   = 0.25
+CONF_THRESH   = 0.65    # very high gate — only confident detections shown
 # Run inference every N frames; display ALL frames.
 # N=1 → every frame (slowest, most accurate)
 # N=2 → every other frame (2x faster, boxes held between frames)
 # N=3 → every 3rd frame (3x faster, good for slow CPU)
-INFER_EVERY_N = 2       # change to 1 for GPU, 3 for very slow CPU
+INFER_EVERY_N = 3       # demo mode — skip frames for speed
+
+# Demo cap: stop after this many seconds of video.
+# Set to 0 to process the whole video.
+MAX_SECONDS   = 60
 
 
 def main():
-    mode, source, source_label = ask_source()
+    source, source_label = ask_source()
 
-    # ── Image mode ─────────────────────────────────────────
-    if mode == "image":
-        run_image_detection(source)   # source is a list of image paths
-        return
-
-    # ── Video / webcam / stream mode ───────────────────────
     cap = cv2.VideoCapture(source)
     if not cap.isOpened():
-        print(f"\n[ERROR] Cannot open source: {source}")
+        print(f"\n[ERROR] Cannot open video: {source}")
         sys.exit(1)
 
     # Buffer settings for smooth playback
@@ -1276,26 +694,27 @@ def main():
     video_fps    = cap.get(cv2.CAP_PROP_FPS) or 25.0
     width        = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height       = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    is_file      = isinstance(source, str) and os.path.isfile(source)
-    frame_delay_ms = max(1, int(1000 / video_fps))
 
     print(f"\n  Source     : {source_label}")
     print(f"  Resolution : {width}x{height}")
     print(f"  FPS        : {video_fps:.1f}")
-    if is_file:
-        print(f"  Frames     : {total_frames}")
+    print(f"  Frames     : {total_frames}")
     print(f"  Device     : {DEVICE}")
-    print(f"  Custom model : {'ACTIVE' if model_custom is not None else 'NOT LOADED (run train.py)'}")
+    print(f"  Custom model : ACTIVE")
     print(f"  Infer every: {INFER_EVERY_N} frame(s)")
+
+    # Cap total frames to MAX_SECONDS (demo mode)
+    max_frames = int(MAX_SECONDS * video_fps) if MAX_SECONDS > 0 else 0
+    if max_frames > 0 and (total_frames == 0 or max_frames < total_frames):
+        total_frames = max_frames
+        print(f"  Demo cap   : first {MAX_SECONDS}s ({max_frames} frames)")
+
     print("\n  Press  Q  to stop.\n")
 
     # Output writer
-    out = None
-    out_path = ""
-    if is_file:
-        out_path = os.path.join(BASE_DIR, "outputs/videos/output_annotated.mp4")
-        fourcc   = cv2.VideoWriter_fourcc(*"mp4v")
-        out      = cv2.VideoWriter(out_path, fourcc, video_fps, (width, height))
+    out_path = os.path.join(BASE_DIR, "outputs/videos/output_annotated.mp4")
+    fourcc   = cv2.VideoWriter_fourcc(*"mp4v")
+    out      = cv2.VideoWriter(out_path, fourcc, video_fps, (width, height))
 
     WIN = "Dental Equipment Detection  |  Q = quit"
     cv2.namedWindow(WIN, cv2.WINDOW_NORMAL)
@@ -1325,6 +744,10 @@ def main():
 
             frame_no += 1
 
+            # Demo cap — stop after MAX_SECONDS of video
+            if max_frames > 0 and frame_no > max_frames:
+                break
+
             # Only run inference every INFER_EVERY_N frames
             if frame_no % INFER_EVERY_N == 0:
                 raw_dets     = run_inference(frame, conf_thresh=CONF_THRESH)
@@ -1337,7 +760,7 @@ def main():
             # HUD — fps shown by display thread, pass frame_no only
             annotated = draw_hud(
                 annotated, frame_no,
-                total_frames if is_file else 0,
+                total_frames,
                 0.0,                    # fps placeholder; display thread fills it
                 len(last_tracked),
                 detected_equip,

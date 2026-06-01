@@ -1,20 +1,22 @@
 """
-Dental Tools — YOLOv8 Fine-Tuning Script
-=========================================
-Trains a YOLOv8 model on the "Dental Tools.v1i.yolov8" dataset.
+Dental Instruments — YOLOv8 Fine-Tuning Script
+===============================================
+Trains a YOLOv8 model on the "Dental Instruments.v30i.yolov8" dataset.
 
-Dataset classes (5):
-  0 - AllisForcep
-  1 - AustinRetractor
-  2 - BayonetForcep
-  3 - CheekRetractor
-  4 - Coupland1
+Dataset classes (14):
+  0 - Blade holder              7 - airotor
+  1 - Burnisher                 8 - composite instrument
+  2 - Contra-angle handpiece    9 - forcep
+  3 - Cord packer              10 - plastic filling instrument
+  4 - Dycal carrier            11 - prophy
+  5 - Explorer No.5            12 - spoon excavators
+  6 - Mouth mirror             13 - triple syringe dental
 
 Usage:
   python train.py
 
 After training the best weights are saved to:
-  runs/detect/dental_tools/weights/best.pt
+  runs/detect/dental_instruments/weights/best.pt
 
 That path is automatically picked up by main.py.
 """
@@ -30,11 +32,11 @@ from ultralytics import YOLO
 # PATHS
 # ─────────────────────────────────────────────────────────────
 BASE_DIR     = Path(__file__).resolve().parent
-DATASET_DIR  = BASE_DIR / "Dental Tools.v1i.yolov8"
+DATASET_DIR  = BASE_DIR / "Dental Instruments.v30i.yolov8"
 ORIG_YAML    = DATASET_DIR / "data.yaml"
 FIXED_YAML   = BASE_DIR / "dental_data.yaml"   # absolute-path version
 RUNS_DIR     = BASE_DIR / "runs"
-PROJECT_NAME = "dental_tools"
+PROJECT_NAME = "dental_instruments"
 
 # ─────────────────────────────────────────────────────────────
 # TRAINING HYPER-PARAMETERS
@@ -45,13 +47,13 @@ PROJECT_NAME = "dental_tools"
 #   yolov8m.pt  — medium, best accuracy/speed trade-off  ← default
 #   yolov8l.pt  — large, high accuracy (needs GPU)
 #   yolov8x.pt  — extra-large, highest accuracy (needs GPU)
-BASE_MODEL   = "yolov8m.pt"
+BASE_MODEL   = "yolov8m.pt"  # already on disk — no network download needed
 
-EPOCHS       = 100          # max epochs; early-stopping kicks in at patience=20
-IMGSZ        = 640          # matches dataset pre-processing size
-BATCH        = 16           # reduce to 8 if you get OOM errors
-WORKERS      = 4            # data-loader workers (reduce to 0 on Windows if issues)
-PATIENCE     = 20           # early-stop if no improvement for 20 epochs
+EPOCHS       = 5            # tight demo run with yolov8m; raise later for accuracy
+IMGSZ        = 320          # half of 640 → ~4x faster on CPU
+BATCH        = 8
+WORKERS      = 0            # 0 = no multiprocessing (Windows-safe, avoids loader hangs)
+PATIENCE     = 10           # early-stop if no improvement for 10 epochs
 LR0          = 0.01         # initial learning rate
 LRF          = 0.01         # final LR = LR0 * LRF  (cosine schedule)
 MOMENTUM     = 0.937

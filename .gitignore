@@ -1,2 +1,41 @@
-yolov8m.pt yolov8x.pt
+# ── Video files (too large for GitHub) ──────────────────
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.webm
+
+# ── Model weights ───────────────────────────────────────
 *.pt
+*.pth
+*.onnx
+*.engine
+
+# ── Roboflow datasets (download separately) ─────────────
+Dental Instruments.v30i.yolov8/
+Dental Tools.v1i.yolov8/
+datasets/
+
+# ── Training & runtime output ───────────────────────────
+runs/
+outputs/
+logs/
+models/
+
+# ── Auto-generated config ───────────────────────────────
+dental_data.yaml
+
+# ── Python ──────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+.ipynb_checkpoints/
+
+# ── IDE / OS ────────────────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
